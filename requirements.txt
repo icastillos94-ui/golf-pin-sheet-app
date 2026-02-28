@@ -1,6 +1,11 @@
-Flask
-flask-cors
-numpy
-opencv-python-headless
-reportlab
-gunicorn
+Flask==3.0.2
+Flask.SQLAlchemy==3.1.1
+Flask-Cors==4.0.0
+gunicorn==21.2.0
+reportlab==4.1.0
+
+numpy==1.26.4
+opencv-python-headless==4.9.0.80
+Pillow==10.2.0
+shapely==2.0.3
+pyproj==3.6.1
