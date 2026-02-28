@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+#Base de datos local
+instance/
+*.db
+
+#Archivos generados
+generated/
+pdfs/
+uploads/
+
+#Entorno virtual
+venv/
+.env
+
+#Mac
+.DS_Store

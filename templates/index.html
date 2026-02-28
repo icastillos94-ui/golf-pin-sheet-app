@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Golf Pin Sheet App</title>
+
+  <link rel="icon" type="image/svg+xml" href="/icon.svg">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b5d1e">
+  <link rel="manifest" href="/manifest.json">
+
+  <style>
+    body{font-family:Arial;background:#0b5d1e;color:white;text-align:center;margin:0}
+    .container{padding:20px}
+    .panel{background:#0f7a28;padding:20px;border-radius:12px;margin:10px auto;width:90%;max-width:900px}
+    button{padding:10px 20px;margin:5px;border:none;border-radius:8px;background:#1fa83d;color:white;cursor:pointer}
+    button.secondary{background:#126c2d}
+    input, select{margin:4px;padding:8px;border-radius:8px;border:none;max-width:240px}
+    .row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;align-items:center}
+    .status{margin-top:8px;font-size:13px;opacity:0.9}
+    .small{font-size:12px;opacity:0.9}
+
+    /* ✅ CANVAS RESPONSIVO (mantiene lógica interna 600x400, escala visual en móvil) */
+    .canvas-wrap{
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    canvas{
+      border:2px solid white;
+      background:#1e8f35;
+      touch-action:none;
+
+      width: 100%;
+      max-width: 600px;
+      height: auto;
+      display: block;
+      margin: 0 auto;
+    }
+
+    /* iframe con fondo blanco para iOS */
+    #preview{background:white;border-radius:10px}
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>⛳ Pin Sheet Generator (SaaS Demo)</h1>
+  <div class="small">Sistema: X 0–60 (izq→der) | Y 0–40 (abajo→arriba) — ratio real 600×400</div>
+
+  <!-- LOGIN PANEL -->
+  <div class="panel">
+    <h3>Acceso</h3>
+    <div class="row">
+      <input id="loginClubName" placeholder="Nombre Club (solo bootstrap)" />
+      <input id="loginEmail" placeholder="Email" />
+      <input id="loginPassword" placeholder="Password (>=6)" type="password" />
+    </div>
+    <div class="row">
+      <button class="secondary" onclick="bootstrap()">Bootstrap (1 vez)</button>
+      <button onclick="login()">Login</button>
+      <button class="secondary" onclick="logout()">Logout</button>
+    </div>
+    <div class="status" id="authStatus">Estado: No autenticado</div>
+  </div>
+
+  <div class="panel">
+    <h3>Datos</h3>
+    <input id="club" placeholder="Nombre Club (para PDF)">
+    <input id="course" placeholder="Nombre Campo">
+    <input id="date" type="date">
+  </div>
+
+  <div class="panel">
+    <input type="number" id="numHoles" value="1" min="1" max="18">
+    <label>Hoyos por hoja:</label>
+    <select id="layoutSelect">
+      <option value="1">1 por hoja</option>
+      <option value="3">3 por hoja</option>
+      <option value="6">6 por hoja</option>
+      <option value="9">9 por hoja</option>
+      <option value="18">18 por hoja</option>
+    </select>
+    <button onclick="crearHoyos()">Crear Hoyos</button>
+  </div>
+
+  <div id="holesContainer"></div>
+
+  <div class="panel">
+    <button onclick="generarPDF()">Generar PDF</button>
+    <button id="btnOpen" class="secondary" style="display:none" onclick="openPDF()">Abrir PDF</button>
+    <button id="btnDownload" class="secondary" style="display:none" onclick="downloadPDF()">Descargar</button>
+    <button id="btnPrint" class="secondary" style="display:none" onclick="printPDF()">Imprimir</button>
+
+    <iframe id="preview" width="100%" height="500" style="display:none"></iframe>
+  </div>
+</div>
+
+<script>
+  const API = location.origin;
+
+  // ✅ Sistema consistente con canvas 600x400 (3:2)
+  const X_MAX = 60; // eje X 0..60
+  const Y_MAX = 40; // eje Y 0..40
+
+  let holes = [];
+  document.getElementById("date").value = new Date().toISOString().split("T")[0];
+
+  // PDF state
+  let lastPdfUrl = null;
+  let lastPdfBlob = null;
+
+  // ---------------------------
+  // AUTH HELPERS
+  // ---------------------------
+  function getToken(){ return localStorage.getItem("token"); }
+  function setToken(t){ localStorage.setItem("token", t); updateAuthStatus(); }
+  function logout(){ localStorage.removeItem("token"); updateAuthStatus(); alert("Logout OK"); }
+  function authHeaders(){
+    const t = getToken();
+    if(!t) return {"Content-Type":"application/json"};
+    return {"Content-Type":"application/json", "Authorization":"Bearer " + t};
+  }
+  function updateAuthStatus(){
+    const status = document.getElementById("authStatus");
+    status.textContent = getToken() ? "Estado: Autenticado ✅" : "Estado: No autenticado ❌ (haz bootstrap + login)";
+  }
+  updateAuthStatus();
+
+  async function bootstrap(){
+    const club_name = document.getElementById("loginClubName").value || "Club Demo";
+    const email = document.getElementById("loginEmail").value || "";
+    const password = document.getElementById("loginPassword").value || "";
+
+    const res = await fetch(API + "/auth/bootstrap", {
+      method:"POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({club_name, email, password})
+    });
+    const data = await res.json();
+    if(!res.ok){
+      alert("Bootstrap error: " + (data.error || "desconocido"));
+      return;
+    }
+    alert("Bootstrap OK. Ahora haz Login.");
+  }
+
+  async function login(){
+    const email = document.getElementById("loginEmail").value || "";
+    const password = document.getElementById("loginPassword").value || "";
+
+    const res = await fetch(API + "/auth/login", {
+      method:"POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({email, password})
+    });
+    const data = await res.json();
+    if(!res.ok){
+      alert("Login error: " + (data.error || "desconocido"));
+      return;
+    }
+    setToken(data.access_token);
+    alert("Login OK ✅");
+    for(let i=0;i<holes.length;i++){
+      await loadGreen(i);
+    }
+  }
+
+  // ---------------------------
+  // UI HOLES
+  // ---------------------------
+  function crearHoyos(){
+    const n = parseInt(document.getElementById("numHoles").value);
+    const container = document.getElementById("holesContainer");
+    container.innerHTML = "";
+    holes = [];
+
+    for(let i=0;i<n;i++){
+      const panel = document.createElement("div");
+      panel.className = "panel";
+
+      panel.innerHTML = `
+        <h3>Hoyo ${i+1}</h3>
+
+        <button onclick="importar(${i})">Importar Imagen</button>
+        <button onclick="detectarGreen(${i})">Detectar Green Automático</button>
+        <button class="secondary" onclick="guardarGreen(${i})">Guardar Green</button>
+        <button class="secondary" onclick="loadGreen(${i})">Cargar Green</button>
+        <br><br>
+
+        <div class="canvas-wrap">
+          <canvas id="canvas${i}" width="600" height="400"></canvas>
+        </div>
+        <br>
+
+        <button onclick="cerrarPoligono(${i})">Cerrar Green</button>
+        <button onclick="limpiar(${i})">Limpiar</button>
+
+        <br><br>
+
+        <input id="vertical${i}" type="number" min="0" max="${Y_MAX}" placeholder="Vertical (0-${Y_MAX})">
+        <input id="horizontal${i}" type="number" min="0" max="${X_MAX}" placeholder="Horizontal (0-${X_MAX})">
+
+        <select id="lado${i}">
+          <option value="left">Izquierda</option>
+          <option value="right">Derecha</option>
+        </select>
+
+        <select id="unidad${i}" onchange="redraw(${i});computePinFromEdges(${i})">
+          <option value="meters">Metros</option>
+          <option value="yards">Yardas</option>
+        </select>
+
+        <input type="file" id="file${i}" hidden accept="image/*">
+      `;
+
+      container.appendChild(panel);
+      initCanvas(i);
+    }
+  }
+
+  function initCanvas(i){
+    const canvas = document.getElementById("canvas"+i);
+    const ctx = canvas.getContext("2d");
+
+    holes[i] = {
+      canvas, ctx,
+      puntos: [],
+      cerrado: false,
+      image: null,
+      imgObj: null,
+      pin: null,
+      baseY: null
+    };
+
+    redraw(i);
+
+    document.getElementById("vertical"+i).addEventListener("input", ()=>{computePinFromEdges(i); redraw(i);});
+    document.getElementById("horizontal"+i).addEventListener("input", ()=>{computePinFromEdges(i); redraw(i);});
+    document.getElementById("lado"+i).addEventListener("change", ()=>{computePinFromEdges(i); redraw(i);});
+
+    // ✅ FIX: coordenadas correctas aunque el canvas se escale por CSS
+    canvas.addEventListener("pointerdown", e=>{
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+
+      holes[i].puntos.push({
+        x: (e.clientX - rect.left) * scaleX,
+        y: (e.clientY - rect.top) * scaleY
+      });
+      redraw(i);
+    });
+
+    loadGreen(i);
+  }
+
+  // ---------------------------
+  // GRID (X 0..60, Y 0..40)
+  // ---------------------------
+  function drawGrid(i){
+    const h = holes[i];
+    const ctx = h.ctx;
+    const canvas = h.canvas;
+
+    ctx.fillStyle = "#1e8f35";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    const stepX = canvas.width / X_MAX;
+    const stepY = canvas.height / Y_MAX;
+
+    // verticales (X)
+    for(let vx=0; vx<=X_MAX; vx+=5){
+      const x = vx * stepX;
+      if(vx % 10 === 0){
+        ctx.strokeStyle = "rgba(255,255,255,0.20)";
+        ctx.lineWidth = 1.2;
+      }else{
+        ctx.strokeStyle = "rgba(255,255,255,0.10)";
+        ctx.lineWidth = 1;
+      }
+      ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke();
+    }
+
+    // horizontales (Y)
+    for(let vy=0; vy<=Y_MAX; vy+=5){
+      const y = canvas.height - (vy * stepY);
+      if(vy % 10 === 0){
+        ctx.strokeStyle = "rgba(255,255,255,0.20)";
+        ctx.lineWidth = 1.2;
+      }else{
+        ctx.strokeStyle = "rgba(255,255,255,0.10)";
+        ctx.lineWidth = 1;
+      }
+      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke();
+    }
+
+    // labels
+    ctx.fillStyle = "rgba(255,255,255,0.60)";
+    ctx.font = "10px Arial";
+
+    // X labels arriba
+    for(let vx=0; vx<=X_MAX; vx+=10){
+      const x = vx * stepX;
+      ctx.fillText(vx, x+2, 12);
+    }
+
+    // Y labels izquierda
+    for(let vy=0; vy<=Y_MAX; vy+=10){
+      const y = canvas.height - (vy * stepY);
+      ctx.fillText(vy, 2, y-2);
+    }
+  }
+
+  function redraw(i){
+    const h = holes[i];
+    const ctx = h.ctx;
+    const canvas = h.canvas;
+
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    drawGrid(i);
+
+    if(h.imgObj) ctx.drawImage(h.imgObj,0,0,canvas.width,canvas.height);
+
+    if(h.puntos.length>0){
+      ctx.strokeStyle = "white";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(h.puntos[0].x, h.puntos[0].y);
+      h.puntos.forEach(p=>ctx.lineTo(p.x,p.y));
+      if(h.cerrado) ctx.closePath();
+      ctx.stroke();
+    }
+
+    if(h.pin){
+      // base inferior
+      ctx.strokeStyle = "rgba(255,170,0,0.9)";
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(0, h.pin.baseY); ctx.lineTo(canvas.width, h.pin.baseY); ctx.stroke();
+
+      // línea horizontal del pin
+      ctx.strokeStyle = "rgba(255,200,0,0.9)";
+      ctx.beginPath(); ctx.moveTo(0, h.pin.y); ctx.lineTo(canvas.width, h.pin.y); ctx.stroke();
+
+      // segmento útil
+      ctx.strokeStyle = "rgba(70,200,255,0.95)";
+      ctx.beginPath(); ctx.moveTo(h.pin.leftEdge, h.pin.y); ctx.lineTo(h.pin.rightEdge, h.pin.y); ctx.stroke();
+
+      // línea vertical
+      ctx.strokeStyle = "rgba(255,200,0,0.9)";
+      ctx.beginPath(); ctx.moveTo(h.pin.x, 0); ctx.lineTo(h.pin.x, canvas.height); ctx.stroke();
+
+      // pin
+      ctx.fillStyle = "white";
+      ctx.beginPath(); ctx.arc(h.pin.x, h.pin.y, 7, 0, Math.PI*2); ctx.fill();
+
+      ctx.fillStyle = "red";
+      ctx.beginPath(); ctx.arc(h.pin.x, h.pin.y, 5, 0, Math.PI*2); ctx.fill();
+    }
+  }
+
+  // ---------------------------
+  // PIN (adaptado a X_MAX/Y_MAX)
+  // vertical: 0..40 (desde borde inferior real hacia arriba)
+  // horizontal: 0..60 (sobre el corte, desde izq/der)
+  // ---------------------------
+  function computePinFromEdges(i){
+    const h = holes[i];
+    if(h.puntos.length < 3 || !h.cerrado){
+      h.pin = null;
+      return;
+    }
+
+    let v = parseFloat(document.getElementById("vertical"+i).value);
+    let hd = parseFloat(document.getElementById("horizontal"+i).value);
+    if(isNaN(v) || isNaN(hd)){
+      h.pin = null;
+      return;
+    }
+
+    v = Math.max(0, Math.min(Y_MAX, v));
+    hd = Math.max(0, Math.min(X_MAX, hd));
+
+    const side = document.getElementById("lado"+i).value;
+
+    const polyBottomY = Math.max(...h.puntos.map(p=>p.y));
+    const yLine = polyBottomY - (v / Y_MAX) * h.canvas.height;
+
+    const intersections = [];
+    const pts = [...h.puntos, h.puntos[0]];
+
+    for(let j=0; j<pts.length-1; j++){
+      const p1 = pts[j], p2 = pts[j+1];
+      if ((yLine >= Math.min(p1.y,p2.y)) && (yLine <= Math.max(p1.y,p2.y)) && (p1.y !== p2.y)) {
+        const x = p1.x + (yLine - p1.y) * (p2.x - p1.x) / (p2.y - p1.y);
+        intersections.push(x);
+      }
+    }
+
+    if(intersections.length < 2){
+      h.pin = null;
+      return;
+    }
+
+    intersections.sort((a,b)=>a-b);
+    const leftEdge = intersections[0];
+    const rightEdge = intersections[intersections.length-1];
+
+    const pxPerUnitX = h.canvas.width / X_MAX;
+    let x;
+    if(side === "left"){
+      x = leftEdge + (hd * pxPerUnitX);
+    }else{
+      x = rightEdge - (hd * pxPerUnitX);
+    }
+    x = Math.max(leftEdge, Math.min(rightEdge, x));
+
+    h.pin = { x, y: yLine, leftEdge, rightEdge, baseY: polyBottomY };
+  }
+
+  // ---------------------------
+  // SYSTEM CONVERSIONS (canvas px <-> 60x40)
+  // ---------------------------
+  function canvasPxToSystem(canvas, p){
+    const x = (p.x / canvas.width) * X_MAX;
+    const y = ((canvas.height - p.y) / canvas.height) * Y_MAX;
+    return [x, y];
+  }
+
+  function systemToCanvasPx(canvas, p){
+    const x = (p[0] / X_MAX) * canvas.width;
+    const y = canvas.height - ((p[1] / Y_MAX) * canvas.height);
+    return {x, y};
+  }
+
+  async function guardarGreen(i){
+    if(!getToken()){
+      alert("Primero debes hacer login.");
+      return;
+    }
+    const h = holes[i];
+    if(h.puntos.length < 3){
+      alert("No hay polígono para guardar.");
+      return;
+    }
+
+    const points = h.puntos.map(p => canvasPxToSystem(h.canvas, p));
+
+    const res = await fetch(API + "/greens/" + (i+1), {
+      method:"PUT",
+      headers: authHeaders(),
+      body: JSON.stringify({points})
+    });
+
+    const data = await res.json();
+    if(!res.ok){
+      alert("Error guardando: " + (data.error || "desconocido"));
+      return;
+    }
+    alert("Green guardado ✅ (Hoyo " + (i+1) + ")");
+  }
+
+  async function loadGreen(i){
+    if(!getToken()) return;
+
+    const res = await fetch(API + "/greens/" + (i+1), {
+      method:"GET",
+      headers: authHeaders()
+    });
+
+    const data = await res.json();
+    if(!res.ok) return;
+
+    if(data.points && data.points.length >= 3){
+      const h = holes[i];
+      h.puntos = data.points.map(p => systemToCanvasPx(h.canvas, p));
+      h.cerrado = true;
+      computePinFromEdges(i);
+      redraw(i);
+    }
+  }
+
+  // ---------------------------
+  // CONTROLES
+  // ---------------------------
+  async function cerrarPoligono(i){
+    const h = holes[i];
+    if(h.puntos.length > 2){
+      h.cerrado = true;
+      computePinFromEdges(i);
+      redraw(i);
+      if(getToken()){
+        await guardarGreen(i);
+      }
+    }
+  }
+
+  function limpiar(i){
+    const h = holes[i];
+    h.puntos = [];
+    h.image = null;
+    h.imgObj = null;
+    h.pin = null;
+    h.baseY = null;
+    h.cerrado = false;
+    redraw(i);
+  }
+
+  function importar(i){
+    const fileInput = document.getElementById("file"+i);
+    fileInput.click();
+
+    fileInput.onchange = e=>{
+      const file = e.target.files[0];
+      const reader = new FileReader();
+
+      reader.onload = ()=>{
+        const img = new Image();
+        img.onload = ()=>{
+          holes[i].image = reader.result;
+          holes[i].imgObj = img;
+          redraw(i);
+        };
+        img.src = reader.result;
+      };
+
+      reader.readAsDataURL(file);
+    };
+  }
+
+  async function detectarGreen(i){
+    if(!getToken()){
+      alert("Primero debes hacer login.");
+      return;
+    }
+    const h = holes[i];
+    if(!h.image){
+      alert("Importa imagen primero");
+      return;
+    }
+
+    const res = await fetch(API + "/detect_green", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        image: h.image,
+        target_w: h.canvas.width,
+        target_h: h.canvas.height
+      })
+    });
+
+    const data = await res.json();
+    if(data.points && data.points.length){
+      h.puntos = data.points.map(p=>({x:p.x, y:p.y}));
+      h.cerrado = true;
+      computePinFromEdges(i);
+      redraw(i);
+      await guardarGreen(i);
+    }else{
+      alert("No se detectó green");
+    }
+  }
+
+  // ---------------------------
+  // PDF + Open/Download/Print (iPhone Chrome friendly)
+  // ---------------------------
+  async function generarPDF(){
+    if(!getToken()){
+      alert("Primero debes hacer login.");
+      return;
+    }
+
+    const club = document.getElementById("club").value || "Club";
+    const campo = document.getElementById("course").value || "Campo";
+    const fecha = document.getElementById("date").value || "";
+
+    const payload = {
+      club,
+      campo,
+      fecha,
+      layout: parseInt(document.getElementById("layoutSelect").value),
+      greens: holes.map((h,i)=>({
+        hole_number: i+1,
+        points: h.puntos.map(p=>canvasPxToSystem(h.canvas, p)),
+        vertical: Math.max(0, Math.min(Y_MAX, parseFloat(document.getElementById("vertical"+i).value) || 0)),
+        horizontal: Math.max(0, Math.min(X_MAX, parseFloat(document.getElementById("horizontal"+i).value) || 0)),
+        side: document.getElementById("lado"+i).value
+      }))
+    };
+
+    const response = await fetch(API + "/generate_pdf", {
+      method:"POST",
+      headers: authHeaders(),
+      body: JSON.stringify(payload)
+    });
+
+    if(!response.ok){
+      const txt = await response.text();
+      alert("Error generando PDF: " + txt);
+      return;
+    }
+
+    const blob = await response.blob();
+    lastPdfBlob = blob;
+
+    if(lastPdfUrl) URL.revokeObjectURL(lastPdfUrl);
+    lastPdfUrl = URL.createObjectURL(blob);
+
+    const iframe = document.getElementById("preview");
+    iframe.src = lastPdfUrl;
+    iframe.style.display = "block";
+
+    document.getElementById("btnOpen").style.display = "inline-block";
+    document.getElementById("btnDownload").style.display = "inline-block";
+    document.getElementById("btnPrint").style.display = "inline-block";
+  }
+
+  function openPDF(){
+    if(!lastPdfUrl){
+      alert("Primero genera el PDF.");
+      return;
+    }
+    window.open(lastPdfUrl, "_blank");
+  }
+
+  function downloadPDF(){
+    if(!lastPdfUrl){
+      alert("Primero genera el PDF.");
+      return;
+    }
+
+    // Intento de download (en iOS a veces lo ignora)
+    const a = document.createElement("a");
+    a.href = lastPdfUrl;
+    a.download = "green_report.pdf";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    // Fallback para iPhone: abrir en visor para usar Compartir -> Guardar en Archivos / Imprimir
+    setTimeout(() => {
+      try { window.open(lastPdfUrl, "_blank"); } catch(e) {}
+    }, 250);
+  }
+
+  function printPDF(){
+    if(!lastPdfUrl){
+      alert("Primero genera el PDF.");
+      return;
+    }
+    // iOS: mejor imprimir desde el visor del PDF (Compartir -> Imprimir)
+    window.open(lastPdfUrl, "_blank");
+  }
+
+  // init
+  crearHoyos();
+
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("/sw.js");
+    });
+  }
+</script>
+
+</body>
+</html>
