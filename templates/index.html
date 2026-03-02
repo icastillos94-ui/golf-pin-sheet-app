@@ -4,7 +4,16 @@
   <meta charset="UTF-8">
   <title>Golf Pin Sheet App</title>
 
-  <link rel="icon" type="image/svg+xml" href="/icon.svg">
+  <!-- FAVICON -->
+  <link rel="icon" type="image/svg+xml" href='data:image/svg+xml,
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+    <rect width="100" height="100" fill="%230b5d1e"/>
+    <ellipse cx="50" cy="60" rx="40" ry="28" fill="%231fa83d"/>
+    <circle cx="50" cy="60" r="4" fill="black"/>
+    <line x1="50" y1="60" x2="50" y2="20" stroke="white" stroke-width="3"/>
+    <polygon points="50,20 75,28 50,36" fill="red"/>
+  </svg>'>
+
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b5d1e">
   <link rel="manifest" href="/manifest.json">
@@ -14,59 +23,43 @@
     .container{padding:20px}
     .panel{background:#0f7a28;padding:20px;border-radius:12px;margin:10px auto;width:90%;max-width:900px}
     button{padding:10px 20px;margin:5px;border:none;border-radius:8px;background:#1fa83d;color:white;cursor:pointer}
-    button.secondary{background:#126c2d}
-    input, select{margin:4px;padding:8px;border-radius:8px;border:none;max-width:240px}
-    .row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;align-items:center}
-    .status{margin-top:8px;font-size:13px;opacity:0.9}
-    .small{font-size:12px;opacity:0.9}
+    input, select{margin:4px;padding:8px;border-radius:8px;border:none;max-width:220px}
 
-    /* ✅ CANVAS RESPONSIVO (mantiene lógica interna 600x400, escala visual en móvil) */
-    .canvas-wrap{
-      width: 100%;
-      overflow-x: auto;
-      -webkit-overflow-scrolling: touch;
-    }
+    /* Responsive canvas wrapper */
+    .canvas-wrap{width:100%; overflow-x:auto;}
     canvas{
       border:2px solid white;
       background:#1e8f35;
       touch-action:none;
-
-      width: 100%;
-      max-width: 600px;
-      height: auto;
-      display: block;
-      margin: 0 auto;
+      width:100%;
+      max-width:600px;
+      height:auto;
     }
 
-    /* iframe con fondo blanco para iOS */
-    #preview{background:white;border-radius:10px}
+    .small{font-size:12px;opacity:.9}
+    .infoBox{
+      margin-top:8px;
+      padding:10px;
+      border:1px solid rgba(255,255,255,.18);
+      border-radius:10px;
+      background:rgba(0,0,0,.08);
+      text-align:left;
+      display:inline-block;
+      max-width:600px;
+      width:100%;
+    }
+    .infoRow{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+    .badge{padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.15);display:inline-block}
   </style>
 </head>
 <body>
 
 <div class="container">
-  <h1>⛳ Pin Sheet Generator (SaaS Demo)</h1>
-  <div class="small">Sistema: X 0–60 (izq→der) | Y 0–40 (abajo→arriba) — ratio real 600×400</div>
-
-  <!-- LOGIN PANEL -->
-  <div class="panel">
-    <h3>Acceso</h3>
-    <div class="row">
-      <input id="loginClubName" placeholder="Nombre Club (solo bootstrap)" />
-      <input id="loginEmail" placeholder="Email" />
-      <input id="loginPassword" placeholder="Password (>=6)" type="password" />
-    </div>
-    <div class="row">
-      <button class="secondary" onclick="bootstrap()">Bootstrap (1 vez)</button>
-      <button onclick="login()">Login</button>
-      <button class="secondary" onclick="logout()">Logout</button>
-    </div>
-    <div class="status" id="authStatus">Estado: No autenticado</div>
-  </div>
+  <h1>⛳ Pin Sheet Generator</h1>
 
   <div class="panel">
     <h3>Datos</h3>
-    <input id="club" placeholder="Nombre Club (para PDF)">
+    <input id="club" placeholder="Nombre Club">
     <input id="course" placeholder="Nombre Campo">
     <input id="date" type="date">
   </div>
@@ -88,87 +81,22 @@
 
   <div class="panel">
     <button onclick="generarPDF()">Generar PDF</button>
-    <button id="btnOpen" class="secondary" style="display:none" onclick="openPDF()">Abrir PDF</button>
-    <button id="btnDownload" class="secondary" style="display:none" onclick="downloadPDF()">Descargar</button>
-    <button id="btnPrint" class="secondary" style="display:none" onclick="printPDF()">Imprimir</button>
-
     <iframe id="preview" width="100%" height="500" style="display:none"></iframe>
   </div>
 </div>
 
 <script>
+  // Backend en el mismo host (Render / local)
   const API = location.origin;
 
-  // ✅ Sistema consistente con canvas 600x400 (3:2)
-  const X_MAX = 60; // eje X 0..60
-  const Y_MAX = 40; // eje Y 0..40
+  // ✅ Sistema real: 600x400 -> 60x40
+  const X_MAX = 60;
+  const Y_MAX = 40;
 
   let holes = [];
   document.getElementById("date").value = new Date().toISOString().split("T")[0];
 
-  // PDF state
-  let lastPdfUrl = null;
-  let lastPdfBlob = null;
-
-  // ---------------------------
-  // AUTH HELPERS
-  // ---------------------------
-  function getToken(){ return localStorage.getItem("token"); }
-  function setToken(t){ localStorage.setItem("token", t); updateAuthStatus(); }
-  function logout(){ localStorage.removeItem("token"); updateAuthStatus(); alert("Logout OK"); }
-  function authHeaders(){
-    const t = getToken();
-    if(!t) return {"Content-Type":"application/json"};
-    return {"Content-Type":"application/json", "Authorization":"Bearer " + t};
-  }
-  function updateAuthStatus(){
-    const status = document.getElementById("authStatus");
-    status.textContent = getToken() ? "Estado: Autenticado ✅" : "Estado: No autenticado ❌ (haz bootstrap + login)";
-  }
-  updateAuthStatus();
-
-  async function bootstrap(){
-    const club_name = document.getElementById("loginClubName").value || "Club Demo";
-    const email = document.getElementById("loginEmail").value || "";
-    const password = document.getElementById("loginPassword").value || "";
-
-    const res = await fetch(API + "/auth/bootstrap", {
-      method:"POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({club_name, email, password})
-    });
-    const data = await res.json();
-    if(!res.ok){
-      alert("Bootstrap error: " + (data.error || "desconocido"));
-      return;
-    }
-    alert("Bootstrap OK. Ahora haz Login.");
-  }
-
-  async function login(){
-    const email = document.getElementById("loginEmail").value || "";
-    const password = document.getElementById("loginPassword").value || "";
-
-    const res = await fetch(API + "/auth/login", {
-      method:"POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({email, password})
-    });
-    const data = await res.json();
-    if(!res.ok){
-      alert("Login error: " + (data.error || "desconocido"));
-      return;
-    }
-    setToken(data.access_token);
-    alert("Login OK ✅");
-    for(let i=0;i<holes.length;i++){
-      await loadGreen(i);
-    }
-  }
-
-  // ---------------------------
-  // UI HOLES
-  // ---------------------------
+  //////////////////////////////////////////////////////////////
   function crearHoyos(){
     const n = parseInt(document.getElementById("numHoles").value);
     const container = document.getElementById("holesContainer");
@@ -184,8 +112,6 @@
 
         <button onclick="importar(${i})">Importar Imagen</button>
         <button onclick="detectarGreen(${i})">Detectar Green Automático</button>
-        <button class="secondary" onclick="guardarGreen(${i})">Guardar Green</button>
-        <button class="secondary" onclick="loadGreen(${i})">Cargar Green</button>
         <br><br>
 
         <div class="canvas-wrap">
@@ -211,6 +137,16 @@
           <option value="yards">Yardas</option>
         </select>
 
+        <div class="infoBox">
+          <div class="infoRow">
+            <div><span class="badge">Ancho disponible</span> <span id="widthInfo${i}" class="small">—</span></div>
+            <div><span class="badge">Izq / Der</span> <span id="spaceInfo${i}" class="small">—</span></div>
+          </div>
+          <div class="small" style="margin-top:6px;opacity:.8">
+            * Calculado en la altura vertical indicada (corte real del green).
+          </div>
+        </div>
+
         <input type="file" id="file${i}" hidden accept="image/*">
       `;
 
@@ -219,6 +155,7 @@
     }
   }
 
+  //////////////////////////////////////////////////////////////
   function initCanvas(i){
     const canvas = document.getElementById("canvas"+i);
     const ctx = canvas.getContext("2d");
@@ -239,25 +176,19 @@
     document.getElementById("horizontal"+i).addEventListener("input", ()=>{computePinFromEdges(i); redraw(i);});
     document.getElementById("lado"+i).addEventListener("change", ()=>{computePinFromEdges(i); redraw(i);});
 
-    // ✅ FIX: coordenadas correctas aunque el canvas se escale por CSS
     canvas.addEventListener("pointerdown", e=>{
       const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
-
       holes[i].puntos.push({
-        x: (e.clientX - rect.left) * scaleX,
-        y: (e.clientY - rect.top) * scaleY
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
       });
       redraw(i);
     });
-
-    loadGreen(i);
   }
 
-  // ---------------------------
-  // GRID (X 0..60, Y 0..40)
-  // ---------------------------
+  //////////////////////////////////////////////////////////////
+  // GRID X:0–60, Y:0–40 (similar al PDF)
+  //////////////////////////////////////////////////////////////
   function drawGrid(i){
     const h = holes[i];
     const ctx = h.ctx;
@@ -269,49 +200,41 @@
     const stepX = canvas.width / X_MAX;
     const stepY = canvas.height / Y_MAX;
 
-    // verticales (X)
-    for(let vx=0; vx<=X_MAX; vx+=5){
-      const x = vx * stepX;
-      if(vx % 10 === 0){
-        ctx.strokeStyle = "rgba(255,255,255,0.20)";
-        ctx.lineWidth = 1.2;
-      }else{
-        ctx.strokeStyle = "rgba(255,255,255,0.10)";
-        ctx.lineWidth = 1;
-      }
-      ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke();
+    // líneas cada 5 (más fuerte cada 10)
+    for(let v=0; v<=X_MAX; v+=5){
+      const x = v * stepX;
+      ctx.strokeStyle = (v % 10 === 0) ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.10)";
+      ctx.lineWidth = (v % 10 === 0) ? 1.2 : 1;
+      ctx.beginPath();
+      ctx.moveTo(x,0);
+      ctx.lineTo(x,canvas.height);
+      ctx.stroke();
     }
 
-    // horizontales (Y)
-    for(let vy=0; vy<=Y_MAX; vy+=5){
-      const y = canvas.height - (vy * stepY);
-      if(vy % 10 === 0){
-        ctx.strokeStyle = "rgba(255,255,255,0.20)";
-        ctx.lineWidth = 1.2;
-      }else{
-        ctx.strokeStyle = "rgba(255,255,255,0.10)";
-        ctx.lineWidth = 1;
-      }
-      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke();
+    for(let v=0; v<=Y_MAX; v+=5){
+      const y = canvas.height - (v * stepY);
+      ctx.strokeStyle = (v % 10 === 0) ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.10)";
+      ctx.lineWidth = (v % 10 === 0) ? 1.2 : 1;
+      ctx.beginPath();
+      ctx.moveTo(0,y);
+      ctx.lineTo(canvas.width,y);
+      ctx.stroke();
     }
 
     // labels
-    ctx.fillStyle = "rgba(255,255,255,0.60)";
+    ctx.fillStyle = "rgba(255,255,255,0.65)";
     ctx.font = "10px Arial";
-
-    // X labels arriba
-    for(let vx=0; vx<=X_MAX; vx+=10){
-      const x = vx * stepX;
-      ctx.fillText(vx, x+2, 12);
+    for(let v=0; v<=X_MAX; v+=10){
+      const x = v * stepX;
+      ctx.fillText(v, x+2, 12);
     }
-
-    // Y labels izquierda
-    for(let vy=0; vy<=Y_MAX; vy+=10){
-      const y = canvas.height - (vy * stepY);
-      ctx.fillText(vy, 2, y-2);
+    for(let v=0; v<=Y_MAX; v+=10){
+      const y = canvas.height - (v * stepY);
+      ctx.fillText(v, 2, y-2);
     }
   }
 
+  //////////////////////////////////////////////////////////////
   function redraw(i){
     const h = holes[i];
     const ctx = h.ctx;
@@ -322,6 +245,7 @@
 
     if(h.imgObj) ctx.drawImage(h.imgObj,0,0,canvas.width,canvas.height);
 
+    // polígono
     if(h.puntos.length>0){
       ctx.strokeStyle = "white";
       ctx.lineWidth = 2;
@@ -332,42 +256,65 @@
       ctx.stroke();
     }
 
+    // pin + líneas
     if(h.pin){
       // base inferior
       ctx.strokeStyle = "rgba(255,170,0,0.9)";
       ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(0, h.pin.baseY); ctx.lineTo(canvas.width, h.pin.baseY); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, h.pin.baseY);
+      ctx.lineTo(canvas.width, h.pin.baseY);
+      ctx.stroke();
 
       // línea horizontal del pin
       ctx.strokeStyle = "rgba(255,200,0,0.9)";
-      ctx.beginPath(); ctx.moveTo(0, h.pin.y); ctx.lineTo(canvas.width, h.pin.y); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, h.pin.y);
+      ctx.lineTo(canvas.width, h.pin.y);
+      ctx.stroke();
 
       // segmento útil
       ctx.strokeStyle = "rgba(70,200,255,0.95)";
-      ctx.beginPath(); ctx.moveTo(h.pin.leftEdge, h.pin.y); ctx.lineTo(h.pin.rightEdge, h.pin.y); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(h.pin.leftEdge, h.pin.y);
+      ctx.lineTo(h.pin.rightEdge, h.pin.y);
+      ctx.stroke();
 
-      // línea vertical
+      // línea vertical en x del pin
       ctx.strokeStyle = "rgba(255,200,0,0.9)";
-      ctx.beginPath(); ctx.moveTo(h.pin.x, 0); ctx.lineTo(h.pin.x, canvas.height); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(h.pin.x, 0);
+      ctx.lineTo(h.pin.x, canvas.height);
+      ctx.stroke();
 
-      // pin
+      // pin (aro blanco + rojo)
       ctx.fillStyle = "white";
-      ctx.beginPath(); ctx.arc(h.pin.x, h.pin.y, 7, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath();
+      ctx.arc(h.pin.x, h.pin.y, 7, 0, Math.PI*2);
+      ctx.fill();
 
       ctx.fillStyle = "red";
-      ctx.beginPath(); ctx.arc(h.pin.x, h.pin.y, 5, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath();
+      ctx.arc(h.pin.x, h.pin.y, 5, 0, Math.PI*2);
+      ctx.fill();
     }
   }
 
-  // ---------------------------
-  // PIN (adaptado a X_MAX/Y_MAX)
-  // vertical: 0..40 (desde borde inferior real hacia arriba)
-  // horizontal: 0..60 (sobre el corte, desde izq/der)
-  // ---------------------------
+  //////////////////////////////////////////////////////////////
+  // PIN EN CANVAS (entradas X:0–60, Y:0–40)
+  //////////////////////////////////////////////////////////////
+  function setWidthInfo(i, textWidth="—", textSpace="—"){
+    const w = document.getElementById("widthInfo"+i);
+    const s = document.getElementById("spaceInfo"+i);
+    if(w) w.textContent = textWidth;
+    if(s) s.textContent = textSpace;
+  }
+
   function computePinFromEdges(i){
     const h = holes[i];
     if(h.puntos.length < 3 || !h.cerrado){
       h.pin = null;
+      setWidthInfo(i);
       return;
     }
 
@@ -375,37 +322,51 @@
     let hd = parseFloat(document.getElementById("horizontal"+i).value);
     if(isNaN(v) || isNaN(hd)){
       h.pin = null;
+      setWidthInfo(i);
       return;
     }
 
+    // clamp
     v = Math.max(0, Math.min(Y_MAX, v));
     hd = Math.max(0, Math.min(X_MAX, hd));
 
     const side = document.getElementById("lado"+i).value;
 
+    // borde inferior real del polígono (canvas Y crece hacia abajo)
     const polyBottomY = Math.max(...h.puntos.map(p=>p.y));
+
+    // yLine desde fondo hacia arriba: v (0..Y_MAX)
     const yLine = polyBottomY - (v / Y_MAX) * h.canvas.height;
 
+    // intersecciones con y = yLine
     const intersections = [];
     const pts = [...h.puntos, h.puntos[0]];
 
     for(let j=0; j<pts.length-1; j++){
       const p1 = pts[j], p2 = pts[j+1];
       if ((yLine >= Math.min(p1.y,p2.y)) && (yLine <= Math.max(p1.y,p2.y)) && (p1.y !== p2.y)) {
-        const x = p1.x + (yLine - p1.y) * (p2.x - p1.x) / (p2.y - p1.y);
-        intersections.push(x);
+        const xInt = p1.x + (yLine - p1.y) * (p2.x - p1.x) / (p2.y - p1.y);
+        intersections.push(xInt);
       }
     }
 
     if(intersections.length < 2){
       h.pin = null;
+      setWidthInfo(i);
       return;
     }
 
     intersections.sort((a,b)=>a-b);
     const leftEdge = intersections[0];
     const rightEdge = intersections[intersections.length-1];
+    const segW = rightEdge - leftEdge;
+    if(segW <= 1e-6){
+      h.pin = null;
+      setWidthInfo(i);
+      return;
+    }
 
+    // horizontal hd (0..X_MAX) medido desde el borde real de ese corte
     const pxPerUnitX = h.canvas.width / X_MAX;
     let x;
     if(side === "left"){
@@ -415,83 +376,37 @@
     }
     x = Math.max(leftEdge, Math.min(rightEdge, x));
 
-    h.pin = { x, y: yLine, leftEdge, rightEdge, baseY: polyBottomY };
+    // métricas ancho disponible en unidades (0..X_MAX)
+    const availableWidth = (rightEdge - leftEdge) / pxPerUnitX;
+    const leftSpace = (x - leftEdge) / pxPerUnitX;
+    const rightSpace = (rightEdge - x) / pxPerUnitX;
+
+    h.pin = {
+      x,
+      y: yLine,
+      leftEdge,
+      rightEdge,
+      baseY: polyBottomY,
+      availableWidth,
+      leftSpace,
+      rightSpace
+    };
+
+    setWidthInfo(
+      i,
+      `${availableWidth.toFixed(1)}`,
+      `${leftSpace.toFixed(1)} / ${rightSpace.toFixed(1)}`
+    );
   }
 
-  // ---------------------------
-  // SYSTEM CONVERSIONS (canvas px <-> 60x40)
-  // ---------------------------
-  function canvasPxToSystem(canvas, p){
-    const x = (p.x / canvas.width) * X_MAX;
-    const y = ((canvas.height - p.y) / canvas.height) * Y_MAX;
-    return [x, y];
-  }
-
-  function systemToCanvasPx(canvas, p){
-    const x = (p[0] / X_MAX) * canvas.width;
-    const y = canvas.height - ((p[1] / Y_MAX) * canvas.height);
-    return {x, y};
-  }
-
-  async function guardarGreen(i){
-    if(!getToken()){
-      alert("Primero debes hacer login.");
-      return;
-    }
-    const h = holes[i];
-    if(h.puntos.length < 3){
-      alert("No hay polígono para guardar.");
-      return;
-    }
-
-    const points = h.puntos.map(p => canvasPxToSystem(h.canvas, p));
-
-    const res = await fetch(API + "/greens/" + (i+1), {
-      method:"PUT",
-      headers: authHeaders(),
-      body: JSON.stringify({points})
-    });
-
-    const data = await res.json();
-    if(!res.ok){
-      alert("Error guardando: " + (data.error || "desconocido"));
-      return;
-    }
-    alert("Green guardado ✅ (Hoyo " + (i+1) + ")");
-  }
-
-  async function loadGreen(i){
-    if(!getToken()) return;
-
-    const res = await fetch(API + "/greens/" + (i+1), {
-      method:"GET",
-      headers: authHeaders()
-    });
-
-    const data = await res.json();
-    if(!res.ok) return;
-
-    if(data.points && data.points.length >= 3){
-      const h = holes[i];
-      h.puntos = data.points.map(p => systemToCanvasPx(h.canvas, p));
-      h.cerrado = true;
-      computePinFromEdges(i);
-      redraw(i);
-    }
-  }
-
-  // ---------------------------
-  // CONTROLES
-  // ---------------------------
-  async function cerrarPoligono(i){
+  //////////////////////////////////////////////////////////////
+  function cerrarPoligono(i){
     const h = holes[i];
     if(h.puntos.length > 2){
       h.cerrado = true;
+      h.baseY = null;
       computePinFromEdges(i);
       redraw(i);
-      if(getToken()){
-        await guardarGreen(i);
-      }
     }
   }
 
@@ -503,9 +418,11 @@
     h.pin = null;
     h.baseY = null;
     h.cerrado = false;
+    setWidthInfo(i);
     redraw(i);
   }
 
+  //////////////////////////////////////////////////////////////
   function importar(i){
     const fileInput = document.getElementById("file"+i);
     fileInput.click();
@@ -528,11 +445,8 @@
     };
   }
 
+  //////////////////////////////////////////////////////////////
   async function detectarGreen(i){
-    if(!getToken()){
-      alert("Primero debes hacer login.");
-      return;
-    }
     const h = holes[i];
     if(!h.image){
       alert("Importa imagen primero");
@@ -541,7 +455,7 @@
 
     const res = await fetch(API + "/detect_green", {
       method: "POST",
-      headers: authHeaders(),
+      headers: {"Content-Type":"application/json"},
       body: JSON.stringify({
         image: h.image,
         target_w: h.canvas.width,
@@ -553,23 +467,24 @@
     if(data.points && data.points.length){
       h.puntos = data.points.map(p=>({x:p.x, y:p.y}));
       h.cerrado = true;
+      h.baseY = null;
       computePinFromEdges(i);
       redraw(i);
-      await guardarGreen(i);
     }else{
       alert("No se detectó green");
     }
   }
 
-  // ---------------------------
-  // PDF + Open/Download/Print (iPhone Chrome friendly)
-  // ---------------------------
-  async function generarPDF(){
-    if(!getToken()){
-      alert("Primero debes hacer login.");
-      return;
-    }
+  //////////////////////////////////////////////////////////////
+  // 🔥 GENERAR PDF: convertimos puntos a sistema X_MAX / Y_MAX
+  //////////////////////////////////////////////////////////////
+  function canvasPxToData(canvas, p){
+    const x = (p.x / canvas.width) * X_MAX;
+    const y = ((canvas.height - p.y) / canvas.height) * Y_MAX; // y hacia arriba
+    return { x, y };
+  }
 
+  async function generarPDF(){
     const club = document.getElementById("club").value || "Club";
     const campo = document.getElementById("course").value || "Campo";
     const fecha = document.getElementById("date").value || "";
@@ -580,8 +495,7 @@
       fecha,
       layout: parseInt(document.getElementById("layoutSelect").value),
       greens: holes.map((h,i)=>({
-        hole_number: i+1,
-        points: h.puntos.map(p=>canvasPxToSystem(h.canvas, p)),
+        points: h.puntos.map(p=>canvasPxToData(h.canvas, p)),
         vertical: Math.max(0, Math.min(Y_MAX, parseFloat(document.getElementById("vertical"+i).value) || 0)),
         horizontal: Math.max(0, Math.min(X_MAX, parseFloat(document.getElementById("horizontal"+i).value) || 0)),
         side: document.getElementById("lado"+i).value
@@ -590,71 +504,26 @@
 
     const response = await fetch(API + "/generate_pdf", {
       method:"POST",
-      headers: authHeaders(),
+      headers: {"Content-Type":"application/json"},
       body: JSON.stringify(payload)
     });
 
     if(!response.ok){
-      const txt = await response.text();
-      alert("Error generando PDF: " + txt);
+      alert("Error generando PDF");
       return;
     }
 
     const blob = await response.blob();
-    lastPdfBlob = blob;
-
-    if(lastPdfUrl) URL.revokeObjectURL(lastPdfUrl);
-    lastPdfUrl = URL.createObjectURL(blob);
-
+    const url = URL.createObjectURL(blob);
     const iframe = document.getElementById("preview");
-    iframe.src = lastPdfUrl;
+    iframe.src = url;
     iframe.style.display = "block";
-
-    document.getElementById("btnOpen").style.display = "inline-block";
-    document.getElementById("btnDownload").style.display = "inline-block";
-    document.getElementById("btnPrint").style.display = "inline-block";
-  }
-
-  function openPDF(){
-    if(!lastPdfUrl){
-      alert("Primero genera el PDF.");
-      return;
-    }
-    window.open(lastPdfUrl, "_blank");
-  }
-
-  function downloadPDF(){
-    if(!lastPdfUrl){
-      alert("Primero genera el PDF.");
-      return;
-    }
-
-    // Intento de download (en iOS a veces lo ignora)
-    const a = document.createElement("a");
-    a.href = lastPdfUrl;
-    a.download = "green_report.pdf";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-
-    // Fallback para iPhone: abrir en visor para usar Compartir -> Guardar en Archivos / Imprimir
-    setTimeout(() => {
-      try { window.open(lastPdfUrl, "_blank"); } catch(e) {}
-    }, 250);
-  }
-
-  function printPDF(){
-    if(!lastPdfUrl){
-      alert("Primero genera el PDF.");
-      return;
-    }
-    // iOS: mejor imprimir desde el visor del PDF (Compartir -> Imprimir)
-    window.open(lastPdfUrl, "_blank");
   }
 
   // init
   crearHoyos();
 
+  // service worker (opcional)
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
       navigator.serviceWorker.register("/sw.js");

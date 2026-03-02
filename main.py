@@ -524,7 +524,7 @@ def generate_pdf():
                 db.session.add(
                     Green(club_id=club_id, hole_number=hole_number, points_json=json.dumps(points))
                 )
-            db.session.commit()
+            
 
         if len(points) < 3:
             continue
@@ -575,6 +575,21 @@ def generate_pdf():
         yLine = pin_info["yLine"]
         bottom_y = pin_info["bottom"]
 
+        # ---- Ancho disponible en esa altura ----
+        availableWidth = rightEdge - leftEdge
+        leftSpace = pin_x - leftEdge
+        rightSpace = rightEdge - pin_x
+
+        # ---- Texto ancho disponible ----
+        c.setFont("Helvetica", 9)
+        c.setFillColor(colors.black)
+
+        c.drawString(
+            plot_x,
+            plot_y + plot_h + 10,
+            f"Ancho disponible a {vertical:.1f} del fondo: {availableWidth:.1f}   |   Izq: {leftSpace:.1f}   Der: {rightSpace:.1f}"
+        )
+
         # Línea base inferior (desde borde inferior real)
         c.setStrokeColor(colors.Color(0.72, 0.55, 0.08))
         c.setLineWidth(1.2 if layout < 18 else 0.9)
@@ -591,6 +606,35 @@ def generate_pdf():
         c.setStrokeColor(gold)
         c.setLineWidth(1.2 if layout < 18 else 0.9)
         c.line(plot_x, plot_y + yLine * scale, plot_x + plot_w, plot_y + yLine * scale)
+
+        # ---- Marcas de borde izquierdo/derecho en la altura yLine ----
+        c.setStrokeColor(colors.Color(0.85, 0.15, 0.15))  # rojo suave
+        c.setLineWidth(1)
+
+        tick = 5  # alto del "tick" en puntos PDF (visual)
+        xL = plot_x + leftEdge * scale
+        xR = plot_x + rightEdge * scale
+        yY = plot_y + yLine * scale
+
+        # tick izquierdo
+        c.line(xL, yY - tick, xL, yY + tick)
+
+        # tick derecho
+        c.line(xR, yY - tick, xR, yY + tick)
+
+        # ---- Línea de ancho disponible (entre bordes) ----
+        c.setStrokeColor(colors.Color(0.15, 0.25, 0.85))  # azul
+        c.setLineWidth(1)
+        c.line(xL, yY, xR, yY)
+
+        # mini flechas (triangulitos simples)
+        arrow = 4
+        # izquierda
+        c.line(xL, yY, xL + arrow, yY + arrow)
+        c.line(xL, yY, xL + arrow, yY - arrow)
+        # derecha
+        c.line(xR, yY, xR - arrow, yY + arrow)
+        c.line(xR, yY, xR - arrow, yY - arrow)
 
         # Segmento útil
         c.setStrokeColor(colors.Color(0.20, 0.55, 0.85))
@@ -628,6 +672,8 @@ def generate_pdf():
         c.setFont("Helvetica", 7)
         c.setFillColor(colors.grey)
         c.drawCentredString(inner_x + inner_w / 2, inner_y + 6, f"Escala: {X_MAX} × {Y_MAX}")
+
+    db.session.commit()
 
     c.save()
     buffer.seek(0)
